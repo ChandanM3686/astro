@@ -225,7 +225,54 @@ document.getElementById('global-ask-form').addEventListener('submit', async (e) 
     } catch (error) {
         alert(`Error: ${error.message}`);
     } finally {
-        askBtn.disabled = false;
+    askBtn.disabled = false;
         askBtn.textContent = 'Ask';
     }
 });
+
+// 6. Download PDF Report
+async function downloadPDF() {
+    if (!userData || !pendingReportType) {
+        alert('No report data available. Please generate a report first.');
+        return;
+    }
+
+    const btn = document.getElementById('download-pdf-btn');
+    const status = document.getElementById('pdf-status');
+
+    btn.disabled = true;
+    btn.textContent = '⏳ Generating PDF...';
+    status.style.display = 'block';
+    status.textContent = 'Please wait, your PDF is being generated...';
+
+    try {
+        const payload = { ...userData, report_type: pendingReportType };
+        const response = await fetch(`${BASE_URL}/generate_pdf`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || 'Failed to generate PDF');
+        }
+
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Horoscope_${userData.name}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+
+        status.textContent = '✅ PDF downloaded successfully!';
+    } catch (error) {
+        status.textContent = `❌ Error: ${error.message}`;
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '📄 Download PDF Report';
+    }
+}
