@@ -10,13 +10,15 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 import json
 import traceback
-from flask import Flask, request, jsonify, send_from_directory
+import tempfile
+from flask import Flask, request, jsonify, send_from_directory, send_file
 from flask_cors import CORS
 from openai import OpenAI
 from dotenv import load_dotenv
 
 from astro_engine import compute_full_chart
 from prompt import build_report_prompt, build_question_prompt
+from pdf_generator import generate_pdf_report
 
 # ─────────────────────────────────────────────
 #  SETUP
@@ -130,6 +132,76 @@ def generate_report():
         return jsonify({"error": f"Internal error: {str(e)}"}), 500
 
 
+@app.route('/generate_pdf', methods=['POST'])
+def generate_pdf():
+    """Generate a premium Vedic horoscope PDF report.
+    Expects the same JSON body as /generate_report.
+    Returns a PDF file.
+    """
+    try:
+        data = request.json
+        if not data:
+            return jsonify({"error": "No JSON body provided"}), 400
+
+        required = ["name", "birth_date", "birth_time", "place_of_birth", "gender"]
+        missing = [f for f in required if not data.get(f)]
+        if missing:
+            return jsonify({"error": f"Missing fields: {', '.join(missing)}"}), 400
+
+        report_type = data.get("report_type", "complete")
+
+        chart_data = compute_full_chart(
+            name=data["name"],
+            birth_date=data["birth_date"],
+            birth_time=data["birth_time"],
+            place_of_birth=data["place_of_birth"],
+            gender=data["gender"]
+        )
+
+        partner_chart = None
+        target_celebrity = data.get("target_celebrity")
+
+        if report_type == "relationship" and "partner" in data:
+            p_data = data["partner"]
+            if p_data.get("name") and p_data.get("birth_date") and p_data.get("birth_time") and p_data.get("place_of_birth"):
+                partner_chart = compute_full_chart(
+                    name=p_data["name"],
+                    birth_date=p_data["birth_date"],
+                    birth_time=p_data["birth_time"],
+                    place_of_birth=p_data["place_of_birth"],
+                    gender=p_data.get("gender", "other")
+                )
+
+        messages = build_report_prompt(chart_data, report_type, partner_chart, target_celebrity)
+        max_tokens = 500 if report_type == "free" else 1500
+
+        gpt_response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
+            temperature=0.7,
+            max_tokens=max_tokens
+        )
+        prediction = gpt_response.choices[0].message.content
+
+        temp_dir = tempfile.gettempdir()
+        file_path = os.path.join(temp_dir, f"Horoscope_{data['name'].replace(' ', '_')}.pdf")
+        
+        generate_pdf_report(chart_data, prediction, filename=file_path)
+
+        return send_file(
+            file_path,
+            as_attachment=True,
+            download_name=f"Horoscope_{data['name']}.pdf",
+            mimetype='application/pdf'
+        )
+
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": f"Internal error: {str(e)}"}), 500
+
+
 @app.route('/ask', methods=['POST'])
 def ask():
     """Answer a specific astrology question based on the user's chart."""
@@ -184,6 +256,7 @@ if __name__ == '__main__':
     print("   GET  /                    - Frontend UI")
     print("   GET  /health              - Health check")
     print("   POST /generate_report     - Generates specific reports")
+    print("   POST /generate_pdf        - Generates premium PDF reports")
     print("   POST /ask                 - Answer specific question")
     print()
     app.run(debug=True, port=5002)
