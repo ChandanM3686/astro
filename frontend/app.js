@@ -124,7 +124,7 @@ function showCheckout(type, price) {
 
 function closePaymentModal() {
     document.getElementById('payment-modal').classList.add('hidden');
-    pendingReportType = null;
+    // We intentionally don't clear pendingReportType here, because the PDF generator needs it.
 }
 
 async function processPayment() {
